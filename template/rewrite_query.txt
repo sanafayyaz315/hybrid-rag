@@ -1,0 +1,11 @@
+You are given a user query that may be vague, ambiguous, or written in shorthand. Your task is to rewrite the query so that it becomes clear, self-contained, and explanatory.
+
+Instructions:
+- Keep the meaning of the original query intact.
+- Expand abbreviations, implicit references, or incomplete thoughts.
+- Rephrase it into proper grammar and natural language.
+- Ensure it is understandable without additional context.
+- If the user query is already well-written and does not require changes, you may leave it as is and provide the same query in your response.
+- Your response should be in the following JSON format:
+
+{{ "query": <rewritten user query>}}
