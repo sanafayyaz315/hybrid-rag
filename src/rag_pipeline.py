@@ -102,8 +102,9 @@ class RagPipeline:
     def process_file(
             self,
             # file_path_dir: str,
+            session, 
             save_file_path:str = "/tmp/uploaded_docs",
-            file_id_map = {}
+            file_id_map = {},
     
     ):
         # 1. Load file(s) and save to a temp dir
@@ -178,7 +179,7 @@ class RagPipeline:
         #         logger.error(f"Error updating {file_path}: {str(e)}")
         #         raise
 
-        def upsert_parents_to_docstore(new_entries: list, session = None) -> int:
+        def upsert_parents_to_docstore(new_entries: list, session = session) -> int:
             """
             Inserts parent chunks into the docstore table, skipping duplicates.
             new_entries: list of dicts with keys: source, id, text, metadata
@@ -204,25 +205,24 @@ class RagPipeline:
                         )
                         session.add(doc)
                         saved += 1
-
-                session.commit()
-
+                # session.commit()
                 return saved
             else:
                 logger.debug("No doctore session found")
             
-        def _save_parents(new_entries: list):
+        def _save_parents(new_entries: list, session):
             try:      
                 # Create a new session for this operation
-                with self.docstore_session() as session:  # docstore_session is actually SessionLocal
-                    saved_count = upsert_parents_to_docstore(new_entries, session=session)
-                    return saved_count
+                # with self.docstore_session() as session:  # docstore_session is actually SessionLocal
+                saved_count = upsert_parents_to_docstore(new_entries, session=session)
+                return saved_count
             except Exception as e:
                 logger.exception(f"Error saving parent chunks: {e}")
                 raise
         
         # num_saved_parents = _append_to_parents_json(parent_chunks)
-        num_saved_parents = _save_parents(parent_chunks)
+        num_saved_parents = _save_parents(parent_chunks, session)
+        # session.commit()
         logger.debug(f"{num_saved_parents} parent chunks saved in docstore")
 
         # Get text and metadata to be encoded

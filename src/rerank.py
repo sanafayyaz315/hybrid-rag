@@ -1,5 +1,16 @@
 from sentence_transformers.cross_encoder import CrossEncoder
 from typing import List
+import logging
+# # Configure root logger
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    handlers=[logging.StreamHandler()]
+)
+
+# Create a module logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class Rerank:
     def __init__(
@@ -24,8 +35,12 @@ class Rerank:
     ):
 
         rerank_corpus = [hit["text"] for hit in hits]
+        try:
+            scores = self.rerank_model.rank(query, rerank_corpus)
+        except Exception as e:
+            logger.debug(f"Reranking failed due to: {e}")
+            raise
 
-        scores = self.rerank_model.rank(query, rerank_corpus)
         if get_all:
             return scores
         else:

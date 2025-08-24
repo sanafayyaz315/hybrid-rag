@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class DenseEmbedder:
     def __init__(self, 
                  embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2", 
-                 batch_size: int = 32,
+                 batch_size: int = 32
                  ):
         """
         Parameters:
@@ -32,7 +32,12 @@ class DenseEmbedder:
         self.embedding_dim = self.model.embedding_size
         logger.debug(f"Dense Embedder initialized with embedding_dim={self.embedding_dim}")
 
-    def embed(self, text: Union[str, List[str]], doc_type: str = "query") -> np.ndarray:
+    def normalize_embed(self, vector: List):
+        vector = np.array(vector)
+        norm = np.linalg.norm(vector)
+        return  vector / norm if norm != 0 else vector
+
+    def embed(self, text: Union[str, List[str]], doc_type: str = "query", is_normalize: bool = False) -> np.ndarray:
         if not text:
             logger.info("Empty text provided. Nothing to embed (Dense).")
             return np.array([])   
@@ -52,12 +57,18 @@ class DenseEmbedder:
                 embeddings = list(self.model.query_embed(text))
             
             logger.info("Dense Embeddings created successfully")
+            
+            if is_normalize:
+                logger.debug("Normalizing embeddings")
+                embeddings = self.normalize_embed(embeddings)
+                return embeddings
+            
+            logger.debug("NOT Normalizing embeddings")
             return np.array(embeddings)
-        
+            
         except Exception as e:
             logger.error(f"Failed to create embeddings due to: {e}")
             raise
-
 
 class SparseEmbedder:
     def __init__(

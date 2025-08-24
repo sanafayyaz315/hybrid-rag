@@ -1,6 +1,8 @@
 from typing import List, Union, Tuple
 import os
-from sentence_transformers.cross_encoder import CrossEncoder
+from sqlalchemy.orm import Session
+from models import Docstore
+from fastapi import UploadFile
 
 import os
 import fitz  # PyMuPDF
@@ -99,7 +101,41 @@ def retrieve_parent_chunks(hits: List, parent_chunks: List):
     
     return unique_parents
 
-def retrieve_parent_neighbors(ranks, ranked_parents, parent_chunks):
+def retrieve_parent_chunks_from_docstore(hits: list, session: Session):
+    """
+    Fetch unique parent chunks from the docstore table based on child hits.
+    """
+    seen_keys = set()
+    parent_chunks = []
+
+    for hit in hits.points:
+        source = hit.payload["metadata"]["source"]
+        parent_id = hit.payload["metadata"]["parent_id"]
+
+        key = (source, parent_id)
+        if key in seen_keys:
+            continue
+
+        # Fetch parent chunk from DB
+        parent = session.query(Docstore).filter_by(
+            source=source,
+            parent_id=parent_id
+        ).first()
+
+        if parent:
+            parent_chunks.append({
+                "text": parent.text,
+                "metadata": {
+                    "source": parent.source,
+                    "id": parent.parent_id,
+                    **(parent.chunk_metadata or {})
+                }
+            })
+            seen_keys.add(key)
+
+    return parent_chunks
+
+def retrieve_parent_neighbors_json(ranks, ranked_parents, parent_chunks):
     """
     Takes ranks of parent chunk, and finds its previous and next parent chunks
     Input: 
@@ -132,6 +168,62 @@ def retrieve_parent_neighbors(ranks, ranked_parents, parent_chunks):
             neighbors.append({"text": concatenated_neighbors, "metadata": {"source": source}})
 
     return neighbors
+
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+
+def retrieve_parent_neighbors(ranks, ranked_parents, session: Session):
+    """
+    Fetch ranked parents + their previous and next neighbors directly from DB.
+    """
+    neighbors = []
+
+    for rank in ranks:
+        data = ranked_parents[rank["corpus_id"]]
+        parent_id = data.get("metadata", {}).get("id")
+        source = data.get("metadata", {}).get("source")
+
+        if parent_id is None or source is None:
+            continue
+
+        # Query only the needed neighbors (prev, current, next)
+        neighbor_ids = [parent_id - 1, parent_id, parent_id + 1]
+
+        rows = (
+            session.execute(
+                select(Docstore)
+                .where(
+                    Docstore.source == source,
+                    Docstore.parent_id.in_(neighbor_ids),
+                )
+                .order_by(Docstore.parent_id)  # ensures correct sequence
+            )
+            .scalars()
+            .all()
+        )
+
+        concatenated_neighbors = " ".join([row.text for row in rows])
+        neighbors.append({
+            "text": concatenated_neighbors,
+            "metadata": {"source": source}
+        })
+
+    return neighbors
+
+def save_files_locally(local_dir: str, file: UploadFile):
+    file_path = os.path.join(local_dir, file.filename)
+    with open(file_path, "wb") as f:
+            content = file.read()
+            f.write(content)
+            return file_path
+
+
+# save files to local path. Turn this to a function
+                # file_path = os.path.join(upload_dir, file.filename)
+                # with open(file_path, "wb") as f:
+                #     content = await file.read()
+                #     f.write(content)
+                #     saved_files.append(file_path)
 
 def build_context():
     pass

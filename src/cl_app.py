@@ -1,8 +1,9 @@
 import chainlit as cl
 from rag_pipeline import RagPipeline
-from config import API_KEY, SYSTEM_PROMPT_DIR, REWRITE_QUERY_PROMPT_PATH
+from config import API_KEY, SYSTEM_PROMPT_PATH, REWRITE_QUERY_PROMPT_PATH
 import logging
-from config import COLLECTION, GET_NEIGHBORS, MODEL
+from config import COLLECTION, GET_NEIGHBORS, MODEL, COLLECTION_RESOURCES
+from docstore import SessionLocal
 
 
 # # Configure root logger
@@ -22,9 +23,12 @@ pipeline = RagPipeline(
     llm_model=MODEL,
     collection_name=COLLECTION,
     rerank_top_k=5,
-    system_prompt_path=SYSTEM_PROMPT_DIR,
+    system_prompt_path=SYSTEM_PROMPT_PATH,
     rewrite_query_prompt_path=REWRITE_QUERY_PROMPT_PATH,
-    get_neighbors=GET_NEIGHBORS
+    get_neighbors=GET_NEIGHBORS,
+    collection_resources=COLLECTION_RESOURCES,
+    docstore_session=SessionLocal
+    
 )
 
 @cl.on_chat_start

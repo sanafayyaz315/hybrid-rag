@@ -1,7 +1,7 @@
 import numpy as np
 from typing import List, Dict, Any, Optional
 from qdrant_client import QdrantClient, models
-from qdrant_client.http.models import VectorParams, SparseVectorParams, Distance, PointStruct, VectorStruct, SparseVector, FusionQuery, Fusion, Prefetch
+from qdrant_client.http.models import VectorParams, SparseVectorParams, Distance, PointStruct, VectorStruct, SparseVector, FusionQuery, Fusion, Prefetch, Filter, FieldCondition, MatchValue, MatchAny
 import logging
 
 
@@ -137,13 +137,24 @@ class QdrantStore:
         except Exception as e:
              logger.debug(f"An exception occured while running similariy search, Exception: {e}")
     
-    def search(self, dense_query_vector, sparse_query_vector, hybrid=False, query_filter=None, top_k=50):
+    def search(self, dense_query_vector, sparse_query_vector, hybrid=False, top_k=50, sources=None):
         if dense_query_vector is None and sparse_query_vector is None:
             raise ValueError("At least one of dense_query_vector or sparse_embed must be provided")
         else:
              sparse_query_vector = SparseVector(indices=sparse_query_vector[0].indices, 
                                                 values=sparse_query_vector[0].values )
-        
+        query_filter = None
+        if sources:
+             query_filter = Filter(
+                  must=[
+                       FieldCondition(
+                            key="metadata.source",
+                            match=MatchAny(
+                                 any=sources)
+                       )
+                  ]
+             )
+
         # Base search params
         common_params = {
             "collection_name": self.collection_name,
@@ -157,20 +168,21 @@ class QdrantStore:
             if hybrid:
                 try:
                     search_result = self.client.query_points(
-                        **common_params,              
+                        **common_params,     
+                        query=FusionQuery(fusion=Fusion.RRF),         
                         prefetch=[
                             Prefetch(
                                 query=dense_query_vector,
                                 using="dense",
-                                limit=top_k
+                                limit=top_k,
                             ),
                             Prefetch(
                                 query=sparse_query_vector,
                                 using="sparse",
-                                limit=top_k
+                                limit=top_k,
                             )
                         ],
-                        query=FusionQuery(fusion=Fusion.RRF),
+                        
                     )
                     return search_result
                 except Exception as e:

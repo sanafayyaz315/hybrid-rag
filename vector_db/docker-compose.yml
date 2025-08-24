@@ -8,5 +8,36 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: always
+  
+  postgres:
+    image: postgres:15
+    container_name: docstore_db
+    restart: always
+    environment:
+      POSTGRES_USER: docuser
+      POSTGRES_PASSWORD: docpass
+      POSTGRES_DB: docstore
+    ports:
+      - "5431:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin12345
+    command: server /data --console-address ":9090"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9090:9090"   # Web console
+    volumes:
+      - minio-data:/data   # persistent storage
+
+
 volumes:
   qdrant_data:
+  postgres_data:
+  minio-data:
