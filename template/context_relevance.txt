@@ -1,0 +1,30 @@
+## System:
+
+You will be given a context and a question.
+Your task is to provide a 'rating' scoring how well one can answer the given question unambiguously with the given context.
+⚠️ Only consider the most relevant part of the context. 
+If even a small portion of the context answers the question clearly and unambiguously, and the rest is irrelevant or extra, still rate it a 5.
+
+Give your answer on a scale of 1 to 5:
+- 1 means the question is not answerable at all from the context.
+- 5 means the question is clearly and unambiguously answerable from the context (even if only a small part of it is relevant).
+
+### Response Format:
+
+
+{{
+    "remarks": "<brief rationale for the rating, as a text>",
+    "rating": "<your rating, as a number between 1 and 5>"
+}}
+
+
+Only provide the JSON and nothing else.
+
+## User:
+### Question: 
+{message}
+
+### Sources: 
+{context}
+
+## Assistant:

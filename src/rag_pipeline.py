@@ -40,6 +40,7 @@ class RagPipeline:
         llm_model: str = "gpt-3.5-turbo",
         system_prompt_path: str = "../template/rag.txt",
         rewrite_query_prompt_path = None,
+        context_relevance_prompt = "../template/context_relevance.txt",
         dense_embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         sparse_embedding_model_name: str = "Qdrant/bm25",
         cross_encoder_model_name: str = "cross-encoder/ms-marco-MiniLM-L6-v2", 
@@ -56,7 +57,7 @@ class RagPipeline:
         docstore_session = None,
         get_neighbors: bool = True,
         retriever_eval: bool = False,
-        collection_resources: str = ""
+        collection_resources: str = "",
     ):
         self.collection_name = collection_name
         self.llm_api_key = llm_api_key
@@ -89,6 +90,9 @@ class RagPipeline:
 
         with open(system_prompt_path) as f:
             self.system_prompt = f.read()
+
+        with open(context_relevance_prompt) as f:
+            self.context_relevance_prompt = f.read()
 
         if rewrite_query_prompt_path:
             with open(rewrite_query_prompt_path) as f:
@@ -243,6 +247,8 @@ class RagPipeline:
         self.qstore.upsert(dense_embeds, sparse_embeds, payload, self.upsert_batch_size)
         logger.debug(f"Data indexed in vector DB in collection {self.collection_name}")
 
+        return num_saved_parents, len(dense_embeds)
+
     def chat(
             self,
             query: str
@@ -292,52 +298,83 @@ class RagPipeline:
         logger.debug(f"Reranked parent chunks successfully. Number of parent chunks: {len(ranks)}")
 
         # 5. build context and prompt
-        contexts = []
+        llm_contexts = []
 
         if self.get_neighbors:
             with self.docstore_session() as session:
-                neighbors = retrieve_parent_neighbors(ranks, parents, session)
-            for item in neighbors:
+                contexts = retrieve_parent_neighbors(ranks, parents, session)
+            # this is just to format context for the LLM
+            for item in contexts:
                 text = item["text"]
                 source = item.get("metadata", {}).get("source", "Unknown Source")
                 id_ = item.get("metadata", {}).get("id", "Unknown parent id")
                 formatted = f"[Source: {source}, ID: {id_}]\nText: {text}\n"
-                contexts.append(formatted)
-            logger.debug(f"Retrieved neighboring parent chunks. Total number of parent chunks {len(neighbors)}")
+                llm_contexts.append(formatted)
+            logger.debug(f"Retrieved neighboring parent chunks. Total number of parent chunks {len(contexts)}")
 
         else:
+            contexts = []
             for rank in ranks:
+                # formatting text for the LLM
                 data = parents[rank["corpus_id"]]
                 text = data.get("text", "")
                 source = data.get("metadata", {}).get("source", "Unknown Source")
                 id_ = data.get("metadata", {}).get("id", "Unknown parent id")
                 formatted = f"[Source: {source}, ID: {id_}]\nText: {text}\n]"
-                contexts.append(formatted)
+                llm_contexts.append(formatted)
+                contexts.append(data)
+
 
         if not self.retriever_eval:
-            # 6. generate response
+            # 6. Check context relevance
             messages = []
-            messages.append({"role": "system", "content": self.system_prompt})
-            # sending context under the USER tag. For experiment, adjust the 
-            # system prompt to have the context under the system tag, at the very end
-            # of the system prompt to encourage efficient KV cache
-            messages.append({"role": "user", "content": f"User question:\n{query}\n\nContext snippets:\n{contexts}"})
-            
-            def stream():      
-                for chunk in self.llm.stream(messages):
-                    # print(chunk, end="", flush=True)
-                    yield chunk
-            
-            # response = ""
-            # for chunk in self.llm.stream(messages):
-            #     print(chunk, end="", flush=True)
-            #     response += chunk
+            formatted_context_relevance_prompt = self.context_relevance_prompt.format(message=query, context=llm_contexts)
+            messages.append({"role": "system", "content": formatted_context_relevance_prompt})
+            response = self.llm.invoke(messages)
+            print(f"Response: {response}, {type(response)}")
+            response = json.loads(response)
 
-            # return response, contexts
-            return stream(), contexts
+            if self.rewrite_query_prompt:
+                    rewritten_query = query
+            else:
+                rewritten_query = None
+                
+            # only generate the final response if the rating is greater than or equal to 2
+            if response["rating"] >= 2 and response["rating"] <=5:
+                # 7. generate response
+                messages = []
+                messages.append({"role": "system", "content": self.system_prompt})
+                # sending context under the USER tag for efficient KV cache
+                # For experiment, adjust the system prompt to have the context under the system tag, but at the very end
+                # of the system prompt to encourage efficient KV cache
+                messages.append({"role": "user", "content":f"User question:\n{query}\n\nContext snippets:\n{llm_contexts}"})
+
+                def stream():      
+                    for chunk in self.llm.stream(messages):
+                        # print(chunk, end="", flush=True)
+                        yield chunk
+
+                # return response, contexts, rewritten query
+
+                return stream(), {"contexts": contexts, "rewritten_query": rewritten_query}
+            
+            else:
+                stream = f"""I couldn't find specific information to answer your question in the {COLLECTION} collection. 
+                        To get the best results:
+                        • Ensure your question relates to the documents available
+                        • Use the "Get Files" option to see what documents are in this collection
+                        • If the desired file is not present in the list of files, use "Upload File" to upload a new file.
+                        • Try rephrasing your question with more context
+                        The system did retrieve some content, but it didn't directly address your query."""
+                
+                return stream, {"contexts": contexts, "rewritten_query": rewritten_query}
+            
         else:
-            logger.debug(f"retriever_eval: {self.retriever_eval}. In Retriever Eval mode")
-            return None, contexts
+                logger.debug(f"retriever_eval: {self.retriever_eval}. In Retriever Eval mode")
+                return None, contexts
+            
+        
+
 
 if __name__ == "__main__":
     from config import API_KEY
