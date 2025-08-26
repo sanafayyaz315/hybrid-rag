@@ -1,8 +1,10 @@
 from typing import List, Union, Tuple
 import os
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from models import Docstore
 from fastapi import UploadFile
+
 
 import os
 import fitz  # PyMuPDF
@@ -169,8 +171,6 @@ def retrieve_parent_neighbors_json(ranks, ranked_parents, parent_chunks):
 
     return neighbors
 
-from sqlalchemy.orm import Session
-from sqlalchemy import select
 
 def retrieve_parent_neighbors(ranks, ranked_parents, session: Session):
     """

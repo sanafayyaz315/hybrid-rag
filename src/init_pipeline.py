@@ -1,4 +1,5 @@
 from rag_pipeline import RagPipeline
+from docstore import SessionLocal
 from config import (
     API_KEY,
     MODEL,
@@ -39,7 +40,7 @@ rag_pipeline = RagPipeline(
         parent_chunk_overlap=PARENT_CHUNK_OVERLAP,
         child_chunk_size=CHILD_CHUNK_SIZE,
         child_chunk_overlap=CHILD_CHUNK_OVERLAP,
-        docstore_session = None,
+        docstore_session=SessionLocal,
         get_neighbors=GET_NEIGHBORS,
         retriever_eval=False,
         collection_resources=COLLECTION_RESOURCES

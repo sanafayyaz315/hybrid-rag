@@ -14,7 +14,8 @@ class File(Base):
     name = Column(String, nullable=False, unique=True)   # "contract_123.pdf"
     file_metadata = Column(JSON, nullable=False)              # {"path": "..."}
     created_date = Column(DateTime, server_default=func.now())
-    created_by = Column(String, nullable=True)      # e.g. "sana", "system", or a user id
+    created_by = Column(String, nullable=True)    # e.g. "sana", "system", or a user id
+    qdrant_collection = Column(String, nullable=True)
     # deleted_at = Column(DateTime, nullable=True)    # Soft delete column
     
     # One-to-many relationship between file and docstore
