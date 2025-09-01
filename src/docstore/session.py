@@ -1,8 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from models import Base
-from config import (
+from src.config import (
     DOCSTORE_HOST,
     DOCSTORE_PORT,
     DOCSTORE_USER,
@@ -10,9 +9,7 @@ from config import (
     DOCSTORE_NAME
 )
 
-connection_string = f"postgresql+psycopg2://{DOCSTORE_USER}:{DOCSTORE_PASSWORD}@{DOCSTORE_HOST}:{DOCSTORE_PORT}/{DOCSTORE_NAME}"
 POSTGRES_URL = f"{DOCSTORE_USER}:{DOCSTORE_PASSWORD}@{DOCSTORE_HOST}:{DOCSTORE_PORT}/{DOCSTORE_NAME}"
-
 sync_conninfo = f"postgresql+psycopg2://{POSTGRES_URL}"
 async_conninfo = f"postgresql+asyncpg://{POSTGRES_URL}"
 
@@ -23,7 +20,7 @@ pool_recycle = 1800
 pool_pre_ping = True
 echo = False
 
-# 1. Create the engine
+# Sync engine, session factory, and dependence injection
 sync_engine = create_engine(
     sync_conninfo,
     pool_size=pool_size,
@@ -33,7 +30,18 @@ sync_engine = create_engine(
     pool_pre_ping=pool_pre_ping,
     echo=echo,
 )
+# Session Factory
+SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
 
+# Sync Dependency to get DB session per request
+def get_sync_session():
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+# Async engine, async session factory and Dependency
 async_engine = create_async_engine(
     async_conninfo,
     pool_size=pool_size,
@@ -43,17 +51,10 @@ async_engine = create_async_engine(
     pool_pre_ping=pool_pre_ping,
     echo=echo,
 )
+# Session Factory
+AsyncSessionLocal = sessionmaker(bind=async_engine, class_=AsyncSession, expire_on_commit=False)
 
-# engine = create_engine(connection_string, echo=True)  # echo=True logs SQL queries
-
-# 2. Create a configured "Session" class. This creates a session factory
-SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
-
-AsyncSessionLocal = sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
-
-# 3. Initialize tables (idempotent)
-Base.metadata.create_all(bind=sync_engine) # create_all is idempotent
+# Async dependency to get a session
+async def get_async_session():
+    async with AsyncSessionLocal() as session:
+        yield session

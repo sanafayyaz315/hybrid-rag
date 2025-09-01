@@ -1,16 +1,35 @@
 import numpy as np
 from typing import List, Dict, Any, Optional
-from qdrant_client import QdrantClient, models
-from qdrant_client.http.models import VectorParams, SparseVectorParams, Distance, PointStruct, VectorStruct, SparseVector, FusionQuery, Fusion, Prefetch, Filter, FieldCondition, MatchValue, MatchAny
+from fastembed import SparseEmbedding
+from qdrant_client import QdrantClient, AsyncQdrantClient
+from qdrant_client.http.models import (
+                                        VectorParams,
+                                        SparseVectorParams, 
+                                        # Distance, 
+                                        PointStruct, 
+                                        SparseVector, 
+                                        FusionQuery, 
+                                        Fusion, 
+                                        Prefetch, 
+                                        Filter, 
+                                        FilterSelector,
+                                        FieldCondition, 
+                                        MatchValue, 
+                                        MatchAny
+                                    )
 import logging
+import uuid
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+
 class QdrantStore:
     def __init__(
         self,
+        client: QdrantClient = None,
+        async_client : AsyncQdrantClient = None,
         host: str = "localhost",
         port: int = 6333,
         collection_name: str = "test_vectors",
@@ -19,8 +38,13 @@ class QdrantStore:
         sparse_modifier: str = "idf",
         dense_vector_name: str = "dense",
         sparse_vector_name: str = "sparse",
-):
-        self.client = QdrantClient(url=f"http://{host}:{port}")
+):      
+        try:
+            self.client = client or QdrantClient(url=f"http://{host}:{port}")
+            self.async_client = async_client or AsyncQdrantClient(url=f"http://{host}:{port}")
+        except Exception as e:
+            logger.error("Unable to create Qdrant client")
+            raise RuntimeError(f"Unable to create Qdrant client: {e}")
         self.collection_name = collection_name
         self.vector_size = vector_size
         self.distance = distance
@@ -28,17 +52,18 @@ class QdrantStore:
         self.dense_vector_name = dense_vector_name
         self.sparse_vector_name = sparse_vector_name
 
-        self._create_collection_if_needed() # calling it here so a collection cab be created at the time of initialization
+        self.create_collection_if_needed(self.collection_name) # calling it here so a collection can be created at the time of initialization
 
     # internal function    
-    def _create_collection_if_needed(self):
+    def create_collection_if_needed(self, collection_name):
+        collection_name = self.collection_name or collection_name
         """
         Create the collection only if it does not already exist.
         """
-        collection_exists = self.client.collection_exists(self.collection_name)
+        collection_exists = self.client.collection_exists(collection_name)
 
         if not collection_exists:
-                logger.info(f"Creating new collection named {self.collection_name}")
+                logger.info(f"Creating new collection named {collection_name}")
                 try:
                     self.client.create_collection(
                              collection_name=self.collection_name,
@@ -51,23 +76,38 @@ class QdrantStore:
                     logger.info(f"Successfully created collection {self.collection_name}")
                         
                 except Exception as e:
-                        logger.error(f"Unable to create collection {self.collection_name} due to exception {e}")
+                        logger.error(f"Unable to create collection {collection_name} due to exception: {e}")
+                        raise RuntimeError(f"Unable to create collection {collection_name} due to exception: {e}")
         else:
-              logger.info(f"Using existing collection {self.collection_name}")
+              logger.info(f"Using existing collection {collection_name}")
 
     def upsert(
         self,
         dense_embeddings: Optional[np.ndarray],
         sparse_embeddings: Optional[List[SparseVectorParams]],
         metadatas: List[Dict[str, Any]],
-        upsert_batch_size: int
+        upsert_batch_size: int = 500
           # metadatas = [{"text": "chunktext", metadata:{id:0,...}]
     ):
         """
-        embeddings: numpy array (n_points * dim)
-        metadatas: list of dicts, same length as embeds
+        Upsert dense and/or sparse embeddings along with metadata into the Qdrant collection.
+
+        Parameters:
+            dense_embeddings (np.ndarray, optional): Dense embedding vectors of shape (n_points, dim).
+            sparse_embeddings (List[SparseVectorParams], optional): Sparse embedding vectors.
+            metadatas (List[Dict[str, Any]]): List of metadata dictionaries for each point.
+            upsert_batch_size (int, optional): Number of points to upsert per batch. Default is 500.
+
+        Raises:
+            ValueError: If the number of embeddings does not match the number of metadata entries.
+            RuntimeError: If Qdrant upsert fails for any reason.
+
+        Notes:
+            - The method constructs Qdrant PointStruct objects for each point.
+            - Supports both dense and sparse embeddings simultaneously.
+            - Batches are used to prevent memory or network issues for large datasets.
         """
-            # Validate lengths
+        # Validate lengths
         n_points = len(metadatas)
         if dense_embeddings is not None and dense_embeddings.shape[0] != n_points:
             raise ValueError("Dense embeddings and metadata length must match!")
@@ -77,8 +117,7 @@ class QdrantStore:
         # create a list of data points in accordance with Qdrant format (PointStruct objects)
         points = []
         for idx in range(n_points):
-            vector = {}
-              
+            vector = {} 
             if dense_embeddings is not None:
                 vector[self.dense_vector_name] = dense_embeddings[idx].astype(np.float32)
 
@@ -86,10 +125,9 @@ class QdrantStore:
                 indices = sparse_embeddings[idx].indices
                 values = sparse_embeddings[idx].values
                 vector[self.sparse_vector_name] = SparseVector(indices=indices, values=values)
-                # vector[self.sparse_vector_name] = sparse_embeddings[idx]
             
             point = PointStruct(
-                id = idx + 1,
+                id = str(uuid.uuid4()),
                 vector=vector,
                 payload=metadatas[idx]
             )
@@ -110,7 +148,76 @@ class QdrantStore:
             logger.info(f"Upserted {len(points)} points to {self.collection_name}")
         except Exception as e:
             logger.error(f"Upsert to Qdrant failed: {e}")
-            raise 
+            raise RuntimeError(f"Upsert to Qdrant failed: {e}")
+
+    async def async_upsert(
+                self,
+                dense_embeddings: Optional[np.ndarray],
+                sparse_embeddings: Optional[List[SparseVectorParams]],
+                metadatas: List[Dict[str, Any]],
+                upsert_batch_size: int = 500
+                    # metadatas = [{"text": "chunktext", metadata:{id:0,...}]
+            ):
+        """
+        Upsert dense and/or sparse embeddings along with metadata into the Qdrant collection. Uses AsyncQdrantClient.
+
+        Parameters:
+            dense_embeddings (np.ndarray, optional): Dense embedding vectors of shape (n_points, dim).
+            sparse_embeddings (List[SparseVectorParams], optional): Sparse embedding vectors.
+            metadatas (List[Dict[str, Any]]): List of metadata dictionaries for each point.
+            upsert_batch_size (int, optional): Number of points to upsert per batch. Default is 500.
+
+        Raises:
+            ValueError: If the number of embeddings does not match the number of metadata entries.
+            RuntimeError: If Qdrant upsert fails for any reason.
+
+        Notes:
+            - The method constructs Qdrant PointStruct objects for each point.
+            - Supports both dense and sparse embeddings simultaneously.
+            - Batches are used to prevent memory or network issues for large datasets.
+        """
+        # Validate lengths
+        n_points = len(metadatas)
+        if dense_embeddings is not None and dense_embeddings.shape[0] != n_points:
+            raise ValueError("Dense embeddings and metadata length must match!")
+        if sparse_embeddings is not None and len(sparse_embeddings) != n_points:
+            raise ValueError("Sparse embeddings and metadata length must match!")
+
+        # create a list of data points in accordance with Qdrant format (PointStruct objects)
+        points = []
+        for idx in range(n_points):
+            vector = {} 
+            if dense_embeddings is not None:
+                vector[self.dense_vector_name] = dense_embeddings[idx].astype(np.float32)
+
+            if sparse_embeddings is not None:
+                indices = sparse_embeddings[idx].indices
+                values = sparse_embeddings[idx].values
+                vector[self.sparse_vector_name] = SparseVector(indices=indices, values=values)
+            
+            point = PointStruct(
+                id = str(uuid.uuid4()),
+                vector=vector,
+                payload=metadatas[idx]
+            )
+
+            points.append(point)
+        logger.info(f"Upserting {len(points)} points to Qdrant collection {self.collection_name}")
+
+        try:
+            
+            for i in range(0, len(points), upsert_batch_size):
+                    batch_points = points[i: i+upsert_batch_size]
+
+                    await self.async_client.upsert(
+                    collection_name=self.collection_name,
+                    points=batch_points
+                    # points=points
+        )
+            logger.info(f"Upserted {len(points)} points to {self.collection_name}")
+        except Exception as e:
+            logger.error(f"Upsert to Qdrant failed: {e}")
+            raise RuntimeError(f"Upsert to Qdrant failed: {e}")
 
     def search_depcr(self,
                  query_vector: np.ndarray,
@@ -137,23 +244,69 @@ class QdrantStore:
         except Exception as e:
              logger.debug(f"An exception occured while running similariy search, Exception: {e}")
     
-    def search(self, dense_query_vector, sparse_query_vector, hybrid=False, top_k=50, sources=None):
+    def search(
+        self,
+        dense_query_vector: Optional[np.ndarray] = None,
+        sparse_query_vector: Optional[List[SparseEmbedding]] = None,
+        hybrid: bool = False,
+        top_k: int = 50,
+        sources: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Perform a similarity search in the Qdrant collection using dense, sparse, or both types of embeddings.
+
+        Parameters:
+            dense_query_vector (np.ndarray | None): Dense embedding of the query. Optional if sparse vector is provided.
+            sparse_query_vector (List[SparseEmbedding] | None): Sparse embedding(s) of the query. Optional if dense vector is provided.
+            hybrid (bool): If True and both vectors are provided, performs a hybrid search using FusionQuery (RRF). Default is False.
+            top_k (int): Number of top results to retrieve. Default is 50.
+            sources (list | None): List of source strings to filter results. Only documents with metadata.source in this list will be returned.
+
+        Returns:
+            dict: Dictionary containing search results with keys:
+                - "dense": List of dense search results or None.
+                - "sparse": List of sparse search results or None.
+                
+            Behavior by scenario:
+                1. Dense only query: returns {"dense": results, "sparse": None}.
+                2. Sparse only query: returns {"dense": None, "sparse": results}.
+                3. Both dense and sparse, hybrid=True: performs a FusionQuery with RRF and returns raw FusionQuery results.
+                4. Both dense and sparse, hybrid=False: performs separate searches for dense and sparse vectors and returns {"dense": results, "sparse": results}.
+
+        Raises:
+            ValueError: If both `dense_query_vector` and `sparse_query_vector` are None.
+            RuntimeError: If the Qdrant search fails for any reason.
+
+        Notes:
+            - Converts the first SparseEmbedding in `sparse_query_vector` list to a Qdrant `SparseVector`.
+            - Filtering by `sources` is optional; if not provided, all sources are included.
+            - This function ensures a consistent output format for dense and sparse results, making downstream handling easier.
+        """
+        
+        dense_query_vector = None if dense_query_vector is not None and len(dense_query_vector) == 0 else dense_query_vector
+        sparse_query_vector = None if sparse_query_vector is not None and len(sparse_query_vector) == 0 else sparse_query_vector
+
         if dense_query_vector is None and sparse_query_vector is None:
             raise ValueError("At least one of dense_query_vector or sparse_embed must be provided")
-        else:
+        if sparse_query_vector is not None and len(sparse_query_vector) > 0:
              sparse_query_vector = SparseVector(indices=sparse_query_vector[0].indices, 
                                                 values=sparse_query_vector[0].values )
+        else:
+            logger.warning(f"Sparse query vector is an empty array")
+
         query_filter = None
         if sources:
-             query_filter = Filter(
-                  must=[
-                       FieldCondition(
+            if not isinstance(sources, list):
+                sources = list(sources)
+            query_filter = Filter(
+                must=[
+                    FieldCondition(
                             key="metadata.source",
                             match=MatchAny(
-                                 any=sources)
-                       )
-                  ]
-             )
+                                any=sources)
+                    )
+                ]
+            )
 
         # Base search params
         common_params = {
@@ -163,9 +316,10 @@ class QdrantStore:
             "with_payload": True,
             "with_vectors": True
         }
-
+        # if both dense and sparse vectors are provided
         if dense_query_vector is not None and sparse_query_vector is not None:
-            if hybrid:
+            if hybrid: 
+            # HYBRID: perform hybrid query with FusionQuery + prefetch
                 try:
                     search_result = self.client.query_points(
                         **common_params,     
@@ -187,10 +341,12 @@ class QdrantStore:
                     return search_result
                 except Exception as e:
                     logger.debug(f"Unable to perform hybrid search due to the following exception: {e}")
-                    raise
+                    raise RuntimeError(f"Unable to perform hybrid search due to the following exception: {e}")
                 
             else:
                 try:
+                    
+                # SEPARATE SEARCH: perform separate dense and sparse queries
                     dense_search_result = self.client.query_points(
                     **common_params,
                     query=dense_query_vector,
@@ -209,8 +365,9 @@ class QdrantStore:
                     }
                 except Exception as e:
                     logger.debug(f"Tried performing dense and sparse search independently. Failed due to: {e}")
-                    raise
-
+                    raise RuntimeError(f"Tried performing dense and sparse search independently. Failed due to: {e}")
+                
+        # DENSE ONLY SEARCH: query dense vector only
         elif dense_query_vector is not None:
             try:
                 dense_search_result = self.client.query_points(
@@ -218,11 +375,12 @@ class QdrantStore:
                     query=dense_query_vector,
                     using="dense"
                     )
-                return dense_search_result
+                return {"dense": dense_search_result, "sparse": None}
             except Exception as e:
                     logger.debug(f"Tried performing dense search. Failed due to: {e}")
-                    raise
+                    raise RuntimeError(f"Tried performing dense search. Failed due to: {e}")
             
+        # SPARSE ONLY SEARCH: query sparse vector only
         else:
             try:
                 sparse_search_result = self.client.query_points(
@@ -230,25 +388,210 @@ class QdrantStore:
                     query=sparse_query_vector,
                     using="sparse"
                     )
-                return sparse_search_result
+                return {"dense": None, "sparse": sparse_search_result}
+            
             except Exception as e:
                     logger.debug(f"Tried performing sparse search. Failed due to: {e}")
-                    raise
+                    raise RuntimeError(f"Tried performing sparse search. Failed due to: {e}")
 
-    def clear(self):
-        """
-        Delete the entire collection (dangerous).
-        """
-        logger.warning(f"Dropping collection {self.collection_name}")
-        self.client.delete_collection(self.collection_name)
-        logger.warning(f"{self.collection_name} Dropped")
+    async def async_search(
+            self,
+            dense_query_vector: Optional[np.ndarray] = None,
+            sparse_query_vector: Optional[List[SparseEmbedding]] = None,
+            hybrid: bool = True,
+            top_k: int = 50,
+            sources: Optional[List[str]] = None
+        ) -> Dict[str, Any]:
+            """
+            Perform a similarity search in the Qdrant collection using dense, sparse, or both types of embeddings. Uses AsyncQdrantClient
+
+            Parameters:
+                dense_query_vector (np.ndarray | None): Dense embedding of the query. Optional if sparse vector is provided.
+                sparse_query_vector (List[SparseEmbedding] | None): Sparse embedding(s) of the query. Optional if dense vector is provided.
+                hybrid (bool): If True and both vectors are provided, performs a hybrid search using FusionQuery (RRF). Default is False.
+                top_k (int): Number of top results to retrieve. Default is 50.
+                sources (list | None): List of source strings to filter results. Only documents with metadata.source in this list will be returned.
+
+            Returns:
+                dict: Dictionary containing search results with keys:
+                    - "dense": List of dense search results or None.
+                    - "sparse": List of sparse search results or None.
+                    
+                Behavior by scenario:
+                    1. Dense only query: returns {"dense": results, "sparse": None}.
+                    2. Sparse only query: returns {"dense": None, "sparse": results}.
+                    3. Both dense and sparse, hybrid=True: performs a FusionQuery with RRF and returns raw FusionQuery results.
+                    4. Both dense and sparse, hybrid=False: performs separate searches for dense and sparse vectors and returns {"dense": results, "sparse": results}.
+
+            Raises:
+                ValueError: If both `dense_query_vector` and `sparse_query_vector` are None.
+                RuntimeError: If the Qdrant search fails for any reason.
+
+            Notes:
+                - Converts the first SparseEmbedding in `sparse_query_vector` list to a Qdrant `SparseVector`.
+                - Filtering by `sources` is optional; if not provided, all sources are included.
+                - This function ensures a consistent output format for dense and sparse results, making downstream handling easier.
+            """
             
+            dense_query_vector = None if dense_query_vector is not None and len(dense_query_vector) == 0 else dense_query_vector
+            sparse_query_vector = None if sparse_query_vector is not None and len(sparse_query_vector) == 0 else sparse_query_vector
 
+            if dense_query_vector is None and sparse_query_vector is None:
+                raise ValueError("At least one of dense_query_vector or sparse_embed must be provided")
+        
+            if sparse_query_vector is not None and len(sparse_query_vector) > 0:
+                sparse_query_vector = SparseVector(indices=sparse_query_vector[0].indices, 
+                                                    values=sparse_query_vector[0].values )
+            else:
+                logger.warning(f"Sparse query vector is an empty array")
+
+            query_filter = None
+            if sources:
+                if not isinstance(sources, list):
+                    sources = list(sources)
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                                key="metadata.source",
+                                match=MatchAny(
+                                    any=sources)
+                        )
+                    ]
+                )
+
+            # Base search params
+            common_params = {
+                "collection_name": self.collection_name,
+                "query_filter": query_filter,
+                "limit": top_k,
+                "with_payload": True,
+                "with_vectors": True
+            }
+        # HYBRID: if both dense and sparse vectors are provided
+            if dense_query_vector is not None and sparse_query_vector is not None:
+                if hybrid: 
+                    # perform hybrid query with FusionQuery + prefetch
+                    try:
+                        search_result = await self.async_client.query_points(
+                            **common_params,     
+                            query=FusionQuery(fusion=Fusion.RRF),         
+                            prefetch=[
+                                Prefetch(
+                                    query=dense_query_vector,
+                                    using="dense",
+                                    limit=top_k,
+                                ),
+                                Prefetch(
+                                    query=sparse_query_vector,
+                                    using="sparse",
+                                    limit=top_k,
+                                )
+                            ],
+                           
+                        )
+                        return search_result
+                    except Exception as e:
+                        logger.debug(f"Unable to perform hybrid search due to the following exception: {e}")
+                        raise RuntimeError(f"Unable to perform hybrid search due to the following exception: {e}")
+                    
+                else:
+                    try:
+                # SEPERATE DENSE AND SPARSE SEARCH: perform separate dense and sparse queries
+                        dense_search_result = await self.async_client.query_points(
+                        **common_params,
+                        query=dense_query_vector,
+                        using="dense"
+                        )
+
+                        sparse_search_result = self.client.query_points(
+                        **common_params,
+                        query=sparse_query_vector,
+                        using="sparse",
+                        )
+
+                        return {
+                            "dense_search": dense_search_result,
+                            "sparse_search": sparse_search_result
+                        }
+                    except Exception as e:
+                        logger.debug(f"Tried performing dense and sparse search independently. Failed due to: {e}")
+                        raise RuntimeError(f"Tried performing dense and sparse search independently. Failed due to: {e}")
+                    
+            # DENSE ONLY SEARCH: query dense vector only
+            elif dense_query_vector is not None and len(dense_query_vector) > 0:
+                try:
+                    dense_search_result = await self.async_client.query_points(
+                        **common_params,
+                        query=dense_query_vector,
+                        using="dense"
+                        )
+                    return {"dense": dense_search_result, "sparse": None}
+                except Exception as e:
+                        logger.debug(f"Tried performing dense search. Failed due to: {e}")
+                        raise RuntimeError(f"Tried performing dense search. Failed due to: {e}")
                 
+            # SPARSE ONLY SEARCH: query sparse vector only
+            else:
+                try:
+                    sparse_search_result = await self.async_client.query_points(
+                        **common_params,
+                        query=sparse_query_vector,
+                        using="sparse"
+                        )
+                    return {"dense": None, "sparse": sparse_search_result}
+                
+                except Exception as e:
+                        logger.debug(f"Tried performing sparse search. Failed due to: {e}")
+                        raise RuntimeError(f"Tried performing sparse search. Failed due to: {e}")
+
+    def delete_points_by_source(self,
+        collection_name: str,
+        source: str,
+    ) -> None:
+        # Construct filter
+        delete_filter = Filter(
+            must=[
+                FieldCondition(
+                    key="metadata.source",
+                    match=MatchValue(value=source)
+                )
+            ]
+        )
+
+        # Delete points matching the filter
+        self.client.delete(
+            collection_name=collection_name,
+            points_selector=FilterSelector(filter=delete_filter)
+        )
+
+    def clear_collection(self, collection_name: str = None):
+        """
+        Delete the specified collection in Qdrant. 
+
+        Parameters:
+            collection_name (str, optional): Name of the collection to delete. 
+                                            Defaults to the current collection of this store.
+
+        Notes:
+            - This operation is destructive and cannot be undone.
+            - Use with caution.
+        """
+        collection_name = collection_name or self.collection_name
+        try:
+            logger.warning(f"Dropping collection {collection_name}")
+            self.client.delete_collection(collection_name)
+            logger.warning(f"{collection_name} Dropped")
+        except Exception as e:
+            logger.exception(f"Could not drop collection {collection_name}")
+            raise RuntimeError(f"Could not drop collection {collection_name}: {e}")
+                       
 if __name__ == "__main__":
     import numpy as np
     import logging
     from qdrant_client.http.models import SparseVectorParams  # or your sparse vector import
+    from embed import DenseEmbedder, SparseEmbedder
+    from file_loader import FileLoader
+    from chunker import TextChunker
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -256,13 +599,16 @@ if __name__ == "__main__":
     store = QdrantStore(
         host="localhost",
         port=6333,
-        collection_name="test_hybrid_collection_10",
+        collection_name="test_hybrid_collection_13",
         vector_size=2,
         distance="Cosine",
         sparse_modifier="idf",
         dense_vector_name="dense",
         sparse_vector_name="sparse"
     )
+
+    dense_embedder = DenseEmbedder()
+    sparse_embedder = SparseEmbedder()
 
     # Create dummy data for testing
     n_points = 3
@@ -287,34 +633,60 @@ if __name__ == "__main__":
 
     # Prepare query embeddings (dummy again)
     query_dense = np.random.rand(2).astype(np.float32)
-    query_sparse = SparseVector(indices=[1, 2], values=[0.6, 0.3])
-
+    query_sparse = [SparseVector(indices=[1, 2], values=[0.6, 0.3])]
+    
     # # Run hybrid search
-    # print("Hybrid Search Results:")
-    # results = store.search(query_dense=query_dense, query_sparse=query_sparse, top_k=2, mode="hybrid")
-    # for r in results:
-    #     print(r)
+    print("Hybrid Search Results:")
+    results = store.search(dense_query_vector=query_dense, sparse_query_vector=query_sparse, top_k=2, hybrid=True)
+    for r in results:
+        print(r)
 
     # Dense only search
     print("\nDense Search Results:")
-    results = store.search(query_dense=query_dense, top_k=2, mode="dense")
+    results = store.search(dense_query_vector=query_dense, top_k=2)
+    print("--------------")
     for r in results:
         print(r)
 
     # Sparse only search
     print("\nSparse Search Results:")
-    results = store.search(query_sparse=query_sparse, top_k=2, mode="sparse")
+    results = store.search(sparse_query_vector=query_sparse, top_k=2)
+    print("--------------")
+    print("results:" ,results)
     for r in results:
         print(r)
 
     # Both (individual) searches merged
     print("\nBoth Mode (Separate) Search Results:")
-    results = store.search(query_dense=query_dense, query_sparse=query_sparse, top_k=2, mode="both")
+    results = store.search(dense_query_vector=query_dense, sparse_query_vector=query_sparse, top_k=2, hybrid=False)
     for r in results:
         print(r)
 
     # Uncomment to clear collection after test
     # store.clear()
+    # store.collection_name = "finance_studies"
+    # store.delete_points_by_source(collection_name="finance_studies",
+    #                               source="standard_labors_act.pdf"
+    #                               )
+    # store.clear_collection()
+    
+     # file = "/Users/mac/Desktop/machine-learning/hybrid-rag/data/chapters/Chapter_1"
+    # loader = FileLoader()
+    # texts = loader.load_files(file)
+    # chunker = TextChunker()
+    # parent_chunks, child_chunks = chunker.parent_child_splitter(texts)
+    # texts = [chunk["text"] for chunk in child_chunks]
+    # metadatas = [chunk["metadata"] for chunk in child_chunks]
+    
+    # dense_embs = dense_embedder.embed(texts, doc_type="documents")
+    # sparse_embs = sparse_embedder.embed(text=texts)
+
+    # query = "what is a program?"
+    # query_dense = dense_embedder.embed(query, "query")
+    # query_sparse = sparse_embedder.embed(query)
+    # print("query_sparse type:", {type(query_sparse)})
+    # print("~~~~~~~~", query_sparse)
+
 
             
     

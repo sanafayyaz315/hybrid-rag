@@ -1,11 +1,11 @@
 from fastapi import FastAPI
-from routes_files import router as files_router
+from src.api.routes import router 
 
 
 app = FastAPI()
 
 # mount the router
-app.include_router(files_router, prefix="/api", tags=["files"])
+app.include_router(router, prefix="/api", tags=["files"])
 
 if __name__ == "__main__":
     import uvicorn

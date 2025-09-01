@@ -15,25 +15,22 @@ SPARSE_EMBEDDING_MODEL = os.environ.get("SPARSE_EMBEDDING_MODEL")
 MAX_SEQ_LENGTH_EMBEDDING = int(os.environ.get("MAX_SEQ_LENGTH_EMBEDDING"))
 CROSS_ENCODER_MODEL= os.environ.get("CROSS_ENCODER_MODEL")
 
-QDRANT_HOST = os.environ.get("QDRANKT_HOST")
-QDRANT_PORT = os.environ.get("QDRANT_POST")
+QDRANT_HOST = os.environ.get("QDRANT_HOST")
+QDRANT_PORT = os.environ.get("QDRANT_PORT")
 COLLECTION = os.environ.get("COLLECTION")
 resources_string = os.environ.get("COLLECTION_RESOURCES")
 COLLECTION_RESOURCES = [item.strip() for item in resources_string.split(",") if item.strip()]
 DISTANCE = os.environ.get("DISTANCE")
 SPARSE_MODIFIER=os.environ.get("SPARSE_MODIFIER")
+DENSE_VECTOR_NAME=os.environ.get("DENSE_VECTOR_NAME")
+SPARSE_VECTOR_NAME=os.environ.get("SPARSE_VECTOR_NAME")
+UPSERT_BATCH_SIZE=int(os.environ.get("UPSERT_BATCH_SIZE"))
 
 DOCSTORE_USER = os.getenv("DOCSTORE_USER")
 DOCSTORE_PASSWORD = os.getenv("DOCSTORE_PASSWORD")
 DOCSTORE_HOST = os.getenv("DOCSTORE_HOST")
 DOCSTORE_PORT = os.getenv("DOCSTORE_PORT")
 DOCSTORE_NAME = os.getenv("DOCSTORE_NAME")
-
-UPSERT_BATCH_SIZE=int(os.environ.get("UPSERT_BATCH_SIZE"))
-SYSTEM_PROMPT_PATH = os.environ.get("SYSTEM_PROMPT_PATH")
-REWRITE_QUERY_PROMPT_PATH = os.environ.get("REWRITE_QUERY_PROMPT_PATH")
-PARENT_CHUNKS_DIR = os.environ.get("PARENT_CHUNKS_DIR")
-PARENT_CHUNKS_FILE = os.environ.get("PARENT_CHUNKS_FILE")
 
 PARENT_CHUNK_SIZE = int(os.environ.get("PARENT_CHUNK_SIZE"))
 PARENT_CHUNK_OVERLAP = int(os.environ.get("PARENT_CHUNK_OVERLAP"))
@@ -46,8 +43,10 @@ MINIO_ACCESS_KEY = os.environ.get("MINIO_ROOT_USER")
 MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
 MINIO_BUCKET = os.environ.get("MINIO_BUCKET")
 
-with open(SYSTEM_PROMPT_PATH) as f:
-    SYSTEM_PROMPT = f.read()
+SYSTEM_PROMPT_PATH = os.environ.get("SYSTEM_PROMPT_PATH")
+REWRITE_QUERY_PROMPT_PATH = os.environ.get("REWRITE_QUERY_PROMPT_PATH")
+CONTEXT_RELEVANCE_PROMPT_PATH = os.environ.get("CONTEXT_RELEVANCE_PROMPT_PATH")
+
 
 if __name__ == "__main__":
     import os

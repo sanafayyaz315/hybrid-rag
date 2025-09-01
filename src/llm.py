@@ -1,4 +1,6 @@
 from openai import OpenAI, AsyncOpenAI
+import asyncio
+from typing import List, AsyncGenerator
 
 class LLM:
     def __init__(self, api_key: str, model: str = "gpt-3.5-turbo"):
@@ -30,6 +32,30 @@ class LLM:
         for chunk in stream:
             if content := chunk.choices[0].delta.content:
                 yield content
+
+    async def async_invoke(self, messages: List[dict]) -> str:
+        loop = asyncio.get_event_loop()
+        # Run blocking invoke in threadpool
+        return await loop.run_in_executor(None, self.invoke, messages)
+
+    async def async_stream(self, messages: List[dict]) -> AsyncGenerator[str, None]:
+        loop = asyncio.get_event_loop()
+        # Create a queue to buffer the streaming results
+        queue = asyncio.Queue()
+
+        def _stream():
+            for chunk in self.stream(messages):
+                asyncio.run_coroutine_threadsafe(queue.put(chunk), loop)
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop)  # signal completion
+
+        # Run blocking stream in executor
+        asyncio.get_running_loop().run_in_executor(None, _stream)
+
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+            yield chunk
 
 if __name__ == "__main__":
     from config import API_KEY
