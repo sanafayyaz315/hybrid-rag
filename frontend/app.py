@@ -1,9 +1,14 @@
+"""
+app.py
+This module initializes and runs the Chainlit application for the document management and retrieval-augmented generation (RAG) service.
+"""
+
 import chainlit as cl
 from sqlalchemy import select
 import base64, json
 from io import BytesIO
 from fastapi import UploadFile
-from src.builder import pipeline
+from src.rag_pipeline import pipeline
 from src.docstore.session import AsyncSessionLocal, SessionLocal
 from src.api.routes import upload_files
 from src.docstore.files_crud import (async_list_all_files, 
@@ -13,17 +18,12 @@ from src.docstore.files_crud import (async_list_all_files,
                                      async_delete_file_row
                                     )
 from src.rag_utils import rewrite_query, check_context_relevance
-from src.builder import pipeline, rewrite_query_prompt
-import logging
+from src.builder import rewrite_query_prompt, qdrant_store
+from src.config import COLLECTION as collection_name
+from src.logger import logger
+
 
 history_window = 5
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
 
 @cl.set_starters
 async def set_starters():
@@ -144,11 +144,13 @@ async def confirm_delete_file(action: cl.Action):
     async with AsyncSessionLocal() as session:
         try:
             # Call async delete_file endpoint 
-            res = await async_delete_file_row(filename, session=session)
-            if res:
+            res = await async_delete_file_row(filename, session=session, commit=False)
+            if res:  
+                qdrant_store.delete_points_by_source(collection_name=collection_name, source=filename)
+                await session.commit()
                 await cl.Message(content=f"File '{filename}' and related docstore entries deleted.").send()
             else:
-                await cl.Message(content=f"{filename} not available").send()
+                await cl.Message(content=f"{filename} not present in the system.").send()
         
         except Exception as e:
             await cl.Message(content=f"Error deleting file: {e}").send()
@@ -177,14 +179,13 @@ async def on_message(message: cl.Message):
                                       )
     contexts = retrieved_docs
     formatted_context = pipeline.build_context(retrieved_docs)
-    print("retrieved_docs:", retrieved_docs)
     logger.debug(f"Retrieved {len(retrieved_docs)} docs")
     stream = await pipeline.generate_response(query, formatted_context)
 
     # stream response
     response = cl.Message(content="")
     res = ""
-    for chunk in stream:
+    async for chunk in stream:
         res += chunk
         await response.stream_token(chunk)    
 

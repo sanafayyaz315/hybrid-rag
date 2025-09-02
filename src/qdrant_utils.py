@@ -55,10 +55,14 @@ class QdrantStore:
         self.create_collection_if_needed(self.collection_name) # calling it here so a collection can be created at the time of initialization
 
     # internal function    
-    def create_collection_if_needed(self, collection_name):
+    def create_collection_if_needed(self, collection_name) -> None:
         collection_name = self.collection_name or collection_name
         """
-        Create the collection only if it does not already exist.
+        Create the collection only if it does not already exist. Takes no action if the collection already exists.
+        Takes the following parameters:
+            collection_name (str): Name of the collection to create.
+        Returns:
+            None
         """
         collection_exists = self.client.collection_exists(collection_name)
 
@@ -88,7 +92,7 @@ class QdrantStore:
         metadatas: List[Dict[str, Any]],
         upsert_batch_size: int = 500
           # metadatas = [{"text": "chunktext", metadata:{id:0,...}]
-    ):
+    ) -> None:
         """
         Upsert dense and/or sparse embeddings along with metadata into the Qdrant collection.
 
@@ -157,7 +161,7 @@ class QdrantStore:
                 metadatas: List[Dict[str, Any]],
                 upsert_batch_size: int = 500
                     # metadatas = [{"text": "chunktext", metadata:{id:0,...}]
-            ):
+            ) -> None:
         """
         Upsert dense and/or sparse embeddings along with metadata into the Qdrant collection. Uses AsyncQdrantClient.
 
@@ -548,6 +552,20 @@ class QdrantStore:
         collection_name: str,
         source: str,
     ) -> None:
+        """
+        Delete points from the specified collection in Qdrant based on the 'source' field in their metadata.
+        Parameters:
+            collection_name (str): Name of the collection from which to delete points.
+            source (str): The source value to match in the metadata for deletion.
+        Raises:
+            RuntimeError: If the deletion operation fails for any reason.
+        Notes:
+            - This method constructs a filter to identify points with the specified source in their metadata.
+            - All points matching the filter will be deleted from the collection.
+            - Use with caution as this operation is destructive and cannot be undone.
+        Returns:
+            None
+        """
         # Construct filter
         delete_filter = Filter(
             must=[
@@ -564,7 +582,7 @@ class QdrantStore:
             points_selector=FilterSelector(filter=delete_filter)
         )
 
-    def clear_collection(self, collection_name: str = None):
+    def clear_collection(self, collection_name: str = None) -> None:
         """
         Delete the specified collection in Qdrant. 
 

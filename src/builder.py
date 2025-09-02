@@ -1,25 +1,25 @@
-from src.file_loader import FileLoader
-from src.chunker import TextChunker
+"""
+builder.py
+
+This module is responsible for initializing all core components and objects
+required for the Retrieval-Augmented Generation (RAG) pipeline and file 
+management system. It sets up document loaders, chunkers, embedders, vector 
+stores, rerankers, LLMs, and the MinIO storage client.
+"""
 from qdrant_client import QdrantClient, AsyncQdrantClient
 from minio import Minio
+import logging
+from src.file_loader import FileLoader
+from src.chunker import TextChunker
 from src.embed import DenseEmbedder, SparseEmbedder
 from src.rerank import Rerank
 from src.qdrant_utils import QdrantStore
-from src.rag import RagPipeline
 from src.llm import LLM
 from src.docstore.setup import init_db
 from src.docstore.session import AsyncSessionLocal
+from src.cache import RagSemanticCache, RedisClient
 from src.config import *
-import logging
-
-
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 # initialize loader
 loader = FileLoader()
@@ -89,6 +89,18 @@ llm = LLM(
     api_key=API_KEY
 )
 
+# Initialize redis cache client and RAG cache instance
+redis_client = RedisClient(host=REDIS_HOST, port=REDIS_PORT).client
+rag_cache = RagSemanticCache(
+    redis_client=redis_client,
+    embedding_model_name=DENSE_EMBEDDING_MODEL,
+    index_name=INDEX_NAME,
+    redis_url=f"redis://{REDIS_HOST}:{REDIS_PORT}",
+    ttl=CACHE_TTL,
+    prefix=INDEX_NAME,
+    distance_threshold=DISTANCE_THRESHOLD
+)
+
 # Initialize prompts
 with open(SYSTEM_PROMPT_PATH) as f:
     system_prompt = f.read()
@@ -99,22 +111,10 @@ with open(REWRITE_QUERY_PROMPT_PATH) as f:
 with open(CONTEXT_RELEVANCE_PROMPT_PATH) as f:
     context_relevance_prompt = f.read()
 
-# Initialize Rag pipeline
-pipeline = RagPipeline(
-        loader=loader,
-        chunker=chunker,
-        dense_embedder=dense_embedder,
-        sparse_embedder=sparse_embedder,
-        vectorstore=qdrant_store,
-        reranker=reranker,
-        llm=llm,
-        system_prompt=system_prompt,
-        context_relevance_prompt=context_relevance_prompt,
-        context_relevance=True,
-        session=AsyncSessionLocal
-    )
 
 if __name__ == "__main__":
     minio_client = build_minio_client()
     print(minio_client)
+    rag_cache.clear()
+    print("Cleared the cache")
     

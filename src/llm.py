@@ -13,7 +13,11 @@ class LLM:
         self.model = model
 
     def invoke(self, messages: list) -> str:
-        """Get complete response."""
+        """Get complete response.
+        Args:
+            messages (list): List of messages in the chat format.
+        returns: str: Complete response from the LLM
+        """
         response = self.llm.chat.completions.create( 
         model=self.model,
         messages=messages,
@@ -22,7 +26,11 @@ class LLM:
         return response.choices[0].message.content
 
     def stream(self, messages: list):
-        """Stream response token by token."""
+        """Stream response token by token.
+        Args:
+            messages (list): List of messages in the chat format.
+        yields: str: Yields response token by token.
+        """
         stream = self.llm.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -34,11 +42,22 @@ class LLM:
                 yield content
 
     async def async_invoke(self, messages: List[dict]) -> str:
+        """
+        Asynchronously get complete response.
+        Args:
+            messages (list): List of messages in the chat format.
+        returns: str: Complete response from the LLM
+        """
         loop = asyncio.get_event_loop()
         # Run blocking invoke in threadpool
         return await loop.run_in_executor(None, self.invoke, messages)
 
     async def async_stream(self, messages: List[dict]) -> AsyncGenerator[str, None]:
+        """Asynchronously stream response token by token.
+        Args:
+            messages (list): List of messages in the chat format.
+        yields: str: Yields response token by token.
+        """
         loop = asyncio.get_event_loop()
         # Create a queue to buffer the streaming results
         queue = asyncio.Queue()

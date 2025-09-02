@@ -4,6 +4,7 @@ import sys
 sys.path.append(os.path.abspath("../src"))
 load_dotenv(find_dotenv(), override=True)
 
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
 API_KEY = os.environ.get("API_KEY")
 MODEL = os.environ.get("MODEL")
@@ -47,6 +48,14 @@ SYSTEM_PROMPT_PATH = os.environ.get("SYSTEM_PROMPT_PATH")
 REWRITE_QUERY_PROMPT_PATH = os.environ.get("REWRITE_QUERY_PROMPT_PATH")
 CONTEXT_RELEVANCE_PROMPT_PATH = os.environ.get("CONTEXT_RELEVANCE_PROMPT_PATH")
 
+REDIS_HOST=os.environ.get("REDIS_HOST")
+REDIS_PORT=int(os.environ.get("REDIS_PORT"))
+REDIS_DB=int(os.environ.get("REDIS_DB"))
+REDIS_PASSWORD=os.environ.get("REDIS_PASSWORD")
+INDEX_NAME=os.environ.get("INDEX_NAME")
+CACHE_TOP_K=int(os.environ.get("CACHE_TOP_K"))
+DISTANCE_THRESHOLD=float(os.environ.get("DISTANCE_THRESHOLD"))
+CACHE_TTL=int(os.environ.get("CACHE_TTL"))  # Cache time-to-live in seconds (e.g., 86400 seconds = 1 day)
 
 if __name__ == "__main__":
     import os

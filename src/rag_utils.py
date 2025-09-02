@@ -78,7 +78,63 @@ def load_files(path: Union[str, os.PathLike]) -> List[Tuple[str, str]]:
 
     return texts
 
+async def check_context_relevance(user_query: str, context: List[Dict], llm: LLM, context_relevance_prompt: str) -> Dict:
+    """ 
+    Assess the relevance of a given context with respect to a user query using an LLM.
 
+    Parameters:
+        user_query (str): The query or question provided by the user.
+        context (List[Dict]): A list of context items (each as a dictionary) to be evaluated for relevance.
+        llm (LLM): An asynchronous language model instance capable of generating responses.
+        context_relevance_prompt (str): A template prompt for the LLM that defines how relevance should be evaluated.
+                                         The template should include placeholders for the user query and context.
+
+    Returns:
+        Dict: A dictionary containing the relevance assessment, structured as:
+            {
+                "remarks": "<brief rationale for the rating, as a text>",
+                "rating": "<your rating, as a number between 1 and 5>"
+            }
+    """
+    messages = []
+    formatted_context_relevance_prompt = context_relevance_prompt.format(message=user_query, context=context)
+    messages.append({"role": "system", "content": formatted_context_relevance_prompt})
+    relevance_response = await llm.async_invoke(messages)
+    relevance = json.loads(relevance_response)
+    return relevance
+
+async def rewrite_query(user_query: str, llm: LLM, rewrite_query_prompt: str) -> Tuple[str, List]:
+    """
+    Rewrite a user query for improved retrieval or execution and optionally extract relevant sources.
+
+    Parameters:
+        user_query (str): The original query input by the user.
+        llm (LLM): An asynchronous language model instance capable of generating responses.
+        rewrite_query_prompt (str): A template prompt for the LLM instructing how to rewrite the query and
+                                    optionally extract sources.
+
+    Returns:
+        Tuple[str, List]: A tuple containing:
+            - query (str): The rewritten or refined query text.
+            - sources (List): An optional list of relevant sources extracted by the LLM (can be None).
+
+    Example:
+        rewritten_query, sources = await rewrite_query(
+            user_query="Find details about machine learning",
+            llm=my_llm,
+            rewrite_query_prompt="Rewrite the query to be more precise and suggest sources if applicable"
+        )
+    """
+    messages = []
+    messages.append({"role": "system", "content": rewrite_query_prompt})
+    messages.append({"role": "user", "content": user_query})
+    rewritten_res = json.loads(await llm.async_invoke(messages))
+    query = rewritten_res["query"]
+    sources = rewritten_res.get("sources")
+    return query, sources
+
+
+# Not used functions below.
 def retrieve_parent_chunks(hits: List, parent_chunks: List):
     """
     hits: search results for child chunks
@@ -171,7 +227,6 @@ def retrieve_parent_neighbors_json(ranks, ranked_parents, parent_chunks):
 
     return neighbors
 
-
 def retrieve_parent_neighbors(ranks, retrived_parents, session: Session):
     """
     Fetch ranked parents + their previous and next neighbors directly from DB.
@@ -216,69 +271,6 @@ def save_files_locally(local_dir: str, file: UploadFile):
             content = file.read()
             f.write(content)
             return file_path
-
-
-# save files to local path. Turn this to a function
-                # file_path = os.path.join(upload_dir, file.filename)
-                # with open(file_path, "wb") as f:
-                #     content = await file.read()
-                #     f.write(content)
-                #     saved_files.append(file_path)
-
-async def check_context_relevance(user_query: str, context: List[Dict], llm: LLM, context_relevance_prompt: str) -> Dict:
-    """ 
-    Assess the relevance of a given context with respect to a user query using an LLM.
-
-    Parameters:
-        user_query (str): The query or question provided by the user.
-        context (List[Dict]): A list of context items (each as a dictionary) to be evaluated for relevance.
-        llm (LLM): An asynchronous language model instance capable of generating responses.
-        context_relevance_prompt (str): A template prompt for the LLM that defines how relevance should be evaluated.
-                                         The template should include placeholders for the user query and context.
-
-    Returns:
-        Dict: A dictionary containing the relevance assessment, structured as:
-            {
-                "remarks": "<brief rationale for the rating, as a text>",
-                "rating": "<your rating, as a number between 1 and 5>"
-            }
-    """
-    messages = []
-    formatted_context_relevance_prompt = context_relevance_prompt.format(message=user_query, context=context)
-    messages.append({"role": "system", "content": formatted_context_relevance_prompt})
-    relevance_response = await llm.async_invoke(messages)
-    relevance = json.loads(relevance_response)
-    return relevance
-
-async def rewrite_query(user_query: str, llm: LLM, rewrite_query_prompt: str) -> Tuple[str, List]:
-    """
-    Rewrite a user query for improved retrieval or execution and optionally extract relevant sources.
-
-    Parameters:
-        user_query (str): The original query input by the user.
-        llm (LLM): An asynchronous language model instance capable of generating responses.
-        rewrite_query_prompt (str): A template prompt for the LLM instructing how to rewrite the query and
-                                    optionally extract sources.
-
-    Returns:
-        Tuple[str, List]: A tuple containing:
-            - query (str): The rewritten or refined query text.
-            - sources (List): An optional list of relevant sources extracted by the LLM (can be None).
-
-    Example:
-        rewritten_query, sources = await rewrite_query(
-            user_query="Find details about machine learning",
-            llm=my_llm,
-            rewrite_query_prompt="Rewrite the query to be more precise and suggest sources if applicable"
-        )
-    """
-    messages = []
-    messages.append({"role": "system", "content": rewrite_query_prompt})
-    messages.append({"role": "user", "content": user_query})
-    rewritten_res = json.loads(await llm.async_invoke(messages))
-    query = rewritten_res["query"]
-    sources = rewritten_res.get("sources")
-    return query, sources
 
 if __name__ == "__main__":
     texts = load_files("/Users/mac/Desktop/machine-learning/RAG/data/chapters")

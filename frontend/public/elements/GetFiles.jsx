@@ -1,11 +1,10 @@
 import React from "react";
 import { Card } from "@/components/ui/card";
-
+console.log("GetFiles component mounted");
 export default function GetFiles() {
     // props are globally injected by Chainlit
     const files = props.files || [];
-    console.log(files)
-    return (
+    console.log("React component received files:", files);    return (
         <div className="space-y-2">
             {files.length === 0 ? (
                 <Card className="p-4 bg-secondary text-secondary-foreground">

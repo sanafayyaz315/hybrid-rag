@@ -1,3 +1,47 @@
+"""
+api/routes.py
+
+This module defines the FastAPI endpoints for file management and query handling in the application. 
+It provides routes to upload, list, and delete files, as well as generate 
+LLM responses based on user queries and document context. The endpoints can be used to communicate with the application programmatically.
+
+Key functionalities:
+
+1. File Management Endpoints:
+    - `GET /get_all_files`: Lists all files present in the database.
+    - `GET /get_collection_files`: Lists files specific to the main collection.
+    - `POST /upload_files/`: Uploads a file, stages it in the database, 
+      stores it in MinIO, processes it through the pipeline (splitting,
+      embedding, indexing), and commits it to the docstore.
+    - `DELETE /delete_file/async/{filename}`: Deletes a file from the database 
+      and its associated entries in the vector store (Qdrant).
+
+2. Query and LLM Response Endpoint:
+    - `POST /generate_response`: Processes a user query by optionally 
+      rewriting it, retrieving relevant documents, building context, and 
+      generating a streaming response from the LLM pipeline. Supports
+      context relevance checking, reranking, and neighbor retrieval.
+
+3. Pydantic Models:
+    - `FileInfo`: Represents basic information about a file.
+    - `UploadFileResponse`: Returns the status of a file upload along with 
+      file info.
+    - `FilesResponse`: Returns a count and list of file names for listing endpoints.
+
+4. Dependencies:
+    - `SQLAlchemy` for async database sessions and CRUD operations.
+    - `MinIO` for file storage.
+    - `Chainlit` pipeline and RAG utilities for query rewriting, retrieval, 
+      and LLM response generation.
+    - Logging configured to track actions and errors in all endpoints.
+
+Usage:
+    This module is intended to be included in the FastAPI app via:
+        `app.include_router(router)`
+    All endpoints are asynchronous and rely on dependency injection for the
+    database session.
+"""
+
 import logging
 from pydantic import BaseModel
 from fastapi import APIRouter, UploadFile, Depends, HTTPException, File as fastapi_file
@@ -13,17 +57,18 @@ from src.docstore.files_crud import (async_list_all_files,
 from src.docstore.docstore_crud import async_upsert_parents_to_docstore
 from src.docstore.session import get_async_session
 from src.minio_utils import async_upload_file_to_minio, async_download_file
+from src.rag_pipeline import pipeline
 from src.builder import (
     llm,
     system_prompt,
     rewrite_query_prompt,
     context_relevance_prompt,
     minio_client,
-    pipeline
+    qdrant_store
     )
 from src.docstore.session import AsyncSessionLocal
 from src.rag_utils import rewrite_query
-from src.config import MINIO_BUCKET as minio_bucket, TEMP_FILE_DOWNLOAD_DIR as temp_dir
+from src.config import MINIO_BUCKET as minio_bucket, TEMP_FILE_DOWNLOAD_DIR as temp_dir, COLLECTION as collection_name
 
 # Configure logging
 logging.basicConfig(
@@ -109,9 +154,12 @@ async def upload_files(file: UploadFile = fastapi_file(...),
 @router.delete("/delete_file/async/{filename}")
 async def delete_file(filename: str, session: AsyncSession = Depends(get_async_session)):
     try:
-        res = await async_delete_file_row(filename, session)
+        res = await async_delete_file_row(filename, session, commit=False)
         if res:
-            return {"message": f"File '{filename}' and related docstore entries deleted."}
+            qdrant_store.delete_points_by_source(collection_name=collection_name, source=filename)
+            await session.commit()
+            logger.debug(f"File '{filename}' and related docstore and vectorstore entries deleted.")
+            return {"message": f"File '{filename}' and related docstore and vectorstore entries deleted."}
         else:
             return {"message": f"File '{filename}' is not present in the docstore."}
     except Exception as e:
