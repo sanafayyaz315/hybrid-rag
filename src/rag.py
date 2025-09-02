@@ -1,3 +1,9 @@
+"""rag.py
+An Orchestrator module that integrates all components to form a complete
+Retrieval-Augmented Generation (RAG) pipeline. It provides methods to load,
+split, embed, index, retrieve, and generate responses using the LLM based on
+the context from the vector store.
+"""
 import logging, os, asyncio
 from typing import Optional, List, Union, Tuple, Dict, Any, Awaitable, Generator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,16 +18,11 @@ from src.config import *
 from src.docstore.session import AsyncSessionLocal
 from src.rag_utils import check_context_relevance
 from src.builder import *
+from src.cache import RagSemanticCache
 from src.docstore.docstore_crud import (async_retrieve_parent_chunks_from_docstore,
                                     async_retrieve_parent_neighbors)
 from src.docstore.files_crud import async_ensure_unique_filenames
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 class RagPipeline:
     def __init__(
@@ -36,7 +37,8 @@ class RagPipeline:
             llm: LLM,
             system_prompt: str,
             context_relevance_prompt: str,
-            context_relevance: bool = True
+            context_relevance: bool = True,
+            rag_cache: Optional[RagSemanticCache] = None,
 
     ):
         self.loader = loader
@@ -50,13 +52,15 @@ class RagPipeline:
         self.context_relevance_prompt = context_relevance_prompt
         self.context_relevance = context_relevance
         self.session = session
+        self.rag_cache = rag_cache
 
     def load(self, path: Union[str, os.PathLike]) -> List[Tuple[str, str]]:
         """
         Loads text from a file or directory
         Args:
             path: path of a single file or a directory
-        returns: List of tuples [(source, text)]
+        returns: 
+            List of tuples [(source, text)]
         """
         text = self.loader.load_files(path=path)
         return text
@@ -64,9 +68,12 @@ class RagPipeline:
     def split(self, texts: List[Tuple[str, str]],
                     base_metadata: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict], List[Dict]]:
         """
-        Takes List[Tuple[str, str]]: [(source, text)] and some optional base metadata
-        Returns parent and child chunks 
-        parent_chunk and child_chunk: {"text", "metadata"}
+        Splits texts into parent and child chunks
+        Args:
+            texts: List of tuples [(source, text)]
+            base_metadata: Optional base metadata to include with each chunk
+        returns: Tuple of two lists - (parent_chunks, child_chunks)
+            Each chunk is represented as a dictionary with 'text' and 'metadata' keys.
         """
         try:
             parent_chunks, child_chunks = self.chunker.parent_child_splitter(texts=texts, base_metadata=base_metadata)
@@ -129,43 +136,68 @@ class RagPipeline:
                         rerank_top_k: int = 5,                        
                         sources: list = None,
                         rerank: bool = True,
-                        retrieve_neighbors: bool = True                     
-            ) -> List[Dict[str, str]]:
-        """Retrieves documents relevant to a query from the vector store.
+                        retrieve_neighbors: bool = True,
+                        cache_top_k: int = 1,
+                        cache: bool = True
+            ) -> Awaitable[List[Dict[str, str]]]:
+        """
+        Retrieves documents relevant to a query from the vector store.
 
-    The function performs hybrid retrieval using dense and sparse embeddings,
-    fetches parent document chunks, and optionally applies reranking and
-    neighbor retrieval for improved results.
+        The function performs hybrid retrieval using dense and sparse embeddings,
+        fetches parent document chunks, and optionally applies reranking and
+        neighbor retrieval for improved results.
 
-    Args:
-        query (str): 
-            The input query string for which documents will be retrieved.
-        top_k (int, optional): 
-            Maximum number of candidate documents to retrieve before reranking. 
-            Defaults to 50.
-        rerank_top_k (int, optional): 
-            Number of top documents to keep after reranking. 
-            Defaults to 5.
-        sources (List[str], optional): 
-            A list of strings representing specific sources to restrict the search to. 
-            Defaults to None (search all sources).
-        rerank (bool, optional): 
-            Whether to rerank the retrieved documents. 
-            Defaults to True.
-        retrieve_neighbors (bool, optional): 
-            Whether to retrieve neighboring documents of the retrieved parents. 
-            Defaults to True.
+        Args:
+            query (str): 
+                The input query string for which documents will be retrieved.
+            top_k (int, optional): 
+                Maximum number of candidate documents to retrieve before reranking. 
+                Defaults to 50.
+            rerank_top_k (int, optional): 
+                Number of top documents to keep after reranking. 
+                Defaults to 5.
+            sources (List[str], optional): 
+                A list of strings representing specific sources to restrict the search to. 
+                Defaults to None (search all sources).
+            rerank (bool, optional): 
+                Whether to rerank the retrieved documents. 
+                Defaults to True.
+            retrieve_neighbors (bool, optional): 
+                Whether to retrieve neighboring documents of the retrieved parents. 
+                Defaults to True.
+            cache_top_k (int, optional): 
+                Number of cached results to consider when looking up the cache. 
+                Defaults to 1.
+            cache (bool, optional): 
+                Whether to use the semantic cache for retrieval. 
+                Defaults to True.
 
-    Returns:
-        Awaitable[List[Dict[str, Any]]]: 
+        Returns:
+            Awaitable[List[Dict[str, Any]]]: 
             A list of retrieved document dictionaries. Each dictionary typically
             contains metadata and text for a parent chunk.
 
-    Raises:
-        RuntimeError: If the retrieval process fails at any stage.
-    """
-        # embed the query, similarity search, retrieve parent chunks, rerank, get neighbors
+        Raises:
+            RuntimeError: If the retrieval process fails at any stage.
+        """
+        if cache and self.rag_cache:
+            try:
+                cached_results = self.rag_cache.lookup(prompt=query, top_k=cache_top_k)
+                if cached_results:
+                    logger.debug(f"Cache hit {cached_results[0]['prompt']}")
+                    retrieved_parents = cached_results[0]["metadata"].get("sources", [])
+                    if retrieved_parents:
+                        logger.debug(f"Retrieved {len(retrieved_parents)} documents from cache")
+                        return retrieved_parents
+                    else:
+                        logger.debug("Cache hit but no sources found, proceeding with normal retrieval")
+                        # Proceed with normal retrieval if cache fails
+            except Exception as e:
+                logger.exception(f"Cache lookup failed: {e}")
+                # Proceed with normal retrieval if cache fails
+ 
         try:
+            logger.debug("No cache hit, proceeding with normal retrieval")
             dense_embeds = self.dense_embedder.embed(text=query, doc_type="query")
             sparse_embeds = self.sparse_embedder.embed(text=query)
             hits = await self.vectorstore.async_search(
@@ -192,10 +224,15 @@ class RagPipeline:
             if retrieve_neighbors:
                 async with self.session() as session:
                     retrieved_parents = await async_retrieve_parent_neighbors(docs=retrieved_parents, session=session)
+            
+            if retrieved_parents:
+                self.rag_cache.store(prompt=query, response="", metadata={"sources": retrieved_parents})
+                logger.debug("Cached the retrieved results")
 
             logger.debug(f"Retrieved {len(retrieved_parents)} with rerank={rerank} and neighbors={retrieve_neighbors}")
+            
             return retrieved_parents
-        
+
         except Exception as e:
             logger.exception(f"Failed to retrieve parents: {e}")
             raise RuntimeError(f"Failed to retrieve parents: {e}")
@@ -265,8 +302,8 @@ class RagPipeline:
         """  
         messages = []
 
-        def stream_response(messages):      
-                for chunk in self.llm.stream(messages):
+        async def stream_response(messages):      
+                async for chunk in self.llm.async_stream(messages):
                     yield chunk
   
         # sending context under the USER tag for efficient KV cache
@@ -294,15 +331,17 @@ class RagPipeline:
                 return stream_response(messages)
             
             else:
-                    stream = f"""I couldn't find specific information to answer your question in the {COLLECTION} collection. 
+                async def fallback_message():
+                    yield f"""I couldn't find specific information to answer your question in the {COLLECTION} collection. 
                             To get the best results:
                             • Ensure your question relates to the documents available
                             • Use the "Get Files" option to see what documents are in this collection
                             • If the desired file is not present in the list of files, use "Upload File" to upload a new file.
                             • Try rephrasing your question with more context
                             The system did retrieve some content, but it didn't directly address your query."""
-                    
-                    return stream
+                
+                return fallback_message()
+            
         except Exception as e:
                 logger.exception(f"Unable to generate response: {e}")
                 raise RuntimeError(f"Unable to generate response: {e}")
