@@ -5,9 +5,11 @@ This module initializes and runs the Chainlit application for the document manag
 
 import chainlit as cl
 from sqlalchemy import select
-import base64, json
+import base64
 from io import BytesIO
 from fastapi import UploadFile
+import chainlit.data as cl_data
+from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from src.rag_pipeline import pipeline
 from src.docstore.session import AsyncSessionLocal, SessionLocal
 from src.api.routes import upload_files
@@ -17,12 +19,16 @@ from src.docstore.files_crud import (async_list_all_files,
                                      async_stage_file_rows, 
                                      async_delete_file_row
                                     )
-from src.rag_utils import rewrite_query, check_context_relevance
+from src.rag_utils import rewrite_query
 from src.builder import rewrite_query_prompt, qdrant_store
-from src.config import COLLECTION as collection_name
+from src.config import COLLECTION as collection_name, COLLECTION_RESOURCES
+from src.config import DOCSTORE_HOST, DOCSTORE_PORT, DOCSTORE_USER, DOCSTORE_PASSWORD, DOCSTORE_NAME
 from src.logger import logger
 
+conninfo = f"postgresql+asyncpg://{DOCSTORE_USER}:{DOCSTORE_PASSWORD}@{DOCSTORE_HOST}:{DOCSTORE_PORT}/{DOCSTORE_NAME}"
+cl_data._data_layer = SQLAlchemyDataLayer(conninfo=conninfo, ssl_require=False)
 
+collection_sources = COLLECTION_RESOURCES or []
 history_window = 5
 
 @cl.set_starters
@@ -159,7 +165,7 @@ async def confirm_delete_file(action: cl.Action):
 async def on_message(message: cl.Message):
     history = cl.user_session.get("history")
     pipeline = cl.user_session.get("pipeline")
-    chat_history = "\n".join(f"{item['role'].capitalize()}: {item['content']}" for item in history[history_window:])
+    chat_history = "\n".join(f"{item['role'].capitalize()}: {item['content']}" for item in history[-history_window:])
     user_message = message.content
     history.append(
         {
@@ -169,43 +175,57 @@ async def on_message(message: cl.Message):
     )
 
     async with cl.Step("Query Rewrite") as step:
-        query, sources = await rewrite_query(user_query=user_message, rewrite_query_prompt=rewrite_query_prompt, llm=pipeline.llm)       
-        step.output = query
+        query, sources, fallback_response = await rewrite_query(user_query=user_message,
+                                                                rewrite_query_prompt=rewrite_query_prompt, 
+                                                                llm=pipeline.llm, 
+                                                                chat_history=chat_history, 
+                                                                collection_sources=collection_sources)       
+        
+        step.output = query if query else "No rewritten query"
 
-    logger.debug(f"Actual query: {user_message}\nRewritten query: {query}\n Sources: {sources}")
+    if not query:
+        res = fallback_response
+        response = cl.Message(content=res)
+        logger.debug(f"Fallback response (no valid query): {res}")
+        await response.send()
 
-    retrieved_docs = await pipeline.retrieve(query=query,
-                                             sources=sources                                      
-                                      )
-    contexts = retrieved_docs
-    formatted_context = pipeline.build_context(retrieved_docs)
-    logger.debug(f"Retrieved {len(retrieved_docs)} docs")
-    stream = await pipeline.generate_response(query, formatted_context)
+    else:
+        cl.user_session.set("stop", False)
+        logger.debug(f"Actual query: {user_message}\nRewritten query: {query}\n Sources: {sources}")
+        retrieved_docs = await pipeline.retrieve(query=query,
+                                                sources=sources                                      
+                                        )
+        contexts = retrieved_docs
+        formatted_context = pipeline.build_context(retrieved_docs)
+        logger.debug(f"Retrieved {len(retrieved_docs)} docs")
+        stream = await pipeline.generate_response(query, formatted_context)
+        # stream response
+        response = cl.Message(content="")
+        res = ""
+        async for chunk in stream:
+            res += chunk
+            await response.stream_token(chunk)    
 
-    # stream response
-    response = cl.Message(content="")
-    res = ""
-    async for chunk in stream:
-        res += chunk
-        await response.stream_token(chunk)    
-
-    # output sources
-    elements = []
-    names = []
-   
-    for n, context in enumerate(contexts):
-        name = f"Source_{n}: {context.get('metadata', {}).get('source', 'Unknown Source')}"
-        content = context.get("text", "")
-        names.append(name)
-        element = cl.Text(
-            content=content, name=name, display="side"
-        )
-        elements.append(element)
+        # output sources
+        elements = []
+        names = []
     
-    names = "\n".join(names)
-    result = f"{res}\n\nSources:\n{names}"
-    response.content = result
-    response.elements = elements
+        for n, context in enumerate(contexts):
+            name = f"Source_{n}: {context.get('metadata', {}).get('source', 'Unknown Source')}"
+            content = context.get("text", "")
+            names.append(name)
+            element = cl.Text(
+                content=content, name=name, display="side"
+            )
+            elements.append(element)
+        
+        names = "\n".join(names)
+        result = f"{res}\n\nSources:\n{names}"
+        response.content = result
+        response.elements = elements
+        step.output = res
+        await response.update()
+        await response.send()
 
     history.append(
         {
@@ -213,5 +233,13 @@ async def on_message(message: cl.Message):
             "content": res
         }
     )
-    await response.update()
-    await response.send()
+    cl.user_session.set("history", history)
+
+@cl.on_chat_end
+def end():
+    pass
+
+
+if __name__ == "__main__":
+    from chainlit.cli import run_chainlit
+    run_chainlit(__file__)

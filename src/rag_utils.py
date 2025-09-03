@@ -1,5 +1,5 @@
 from typing import List, Union, Tuple, Dict
-import os, json
+import os, json, ast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi import UploadFile
@@ -78,6 +78,22 @@ def load_files(path: Union[str, os.PathLike]) -> List[Tuple[str, str]]:
 
     return texts
 
+def extract_json_str(text):
+    """
+    Extracts a JSON string from the given text.
+    Args:
+        text (str): The input text containing a JSON string.
+    Returns:
+        str: The extracted JSON string, or None if no valid JSON is found.
+    """
+    try:
+        start = text.index('{')
+        end = text.rindex('}') + 1
+        json_str = text[start:end]
+        return json_str
+    except ValueError:
+        return None
+    
 async def check_context_relevance(user_query: str, context: List[Dict], llm: LLM, context_relevance_prompt: str) -> Dict:
     """ 
     Assess the relevance of a given context with respect to a user query using an LLM.
@@ -103,35 +119,46 @@ async def check_context_relevance(user_query: str, context: List[Dict], llm: LLM
     relevance = json.loads(relevance_response)
     return relevance
 
-async def rewrite_query(user_query: str, llm: LLM, rewrite_query_prompt: str) -> Tuple[str, List]:
+async def rewrite_query(user_query: str, llm: LLM, rewrite_query_prompt: str, chat_history=[], collection_sources=[]) -> Tuple[str, List]:
     """
-    Rewrite a user query for improved retrieval or execution and optionally extract relevant sources.
+    Uses an LLM to rewrite a user query for better retrieval or execution, and optionally
+    extract relevant sources. If the query is deemed invalid, an alternative output message
+    is returned instead.
 
     Parameters:
-        user_query (str): The original query input by the user.
-        llm (LLM): An asynchronous language model instance capable of generating responses.
-        rewrite_query_prompt (str): A template prompt for the LLM instructing how to rewrite the query and
-                                    optionally extract sources.
+        user_query (str): The raw query provided by the user.
+        llm (LLM): An asynchronous language model instance capable of processing prompts.
+        rewrite_query_prompt (str): A template prompt instructing the LLM on how to
+            rewrite the query and/or extract sources.
+        chat_history (list, optional): Prior conversation history to provide context. Defaults to [].
+        sources (list, optional): Existing sources to include in the prompt. Defaults to [].
 
     Returns:
-        Tuple[str, List]: A tuple containing:
-            - query (str): The rewritten or refined query text.
-            - sources (List): An optional list of relevant sources extracted by the LLM (can be None).
+        Tuple[str, List, str]:
+            - query (str or None): The rewritten query if valid, otherwise None.
+            - sources (list): A list of relevant sources extracted by the LLM, or an empty list.
+            - output (str or None): A fallback message provided by the LLM if the query is invalid.
 
-    Example:
-        rewritten_query, sources = await rewrite_query(
-            user_query="Find details about machine learning",
-            llm=my_llm,
-            rewrite_query_prompt="Rewrite the query to be more precise and suggest sources if applicable"
-        )
     """
+    rewrite_query_prompt = rewrite_query_prompt.format(chat_history=chat_history, sources=collection_sources)
     messages = []
     messages.append({"role": "system", "content": rewrite_query_prompt})
     messages.append({"role": "user", "content": user_query})
-    rewritten_res = json.loads(await llm.async_invoke(messages))
-    query = rewritten_res["query"]
-    sources = rewritten_res.get("sources")
-    return query, sources
+    rewritten_res = await llm.async_invoke(messages)
+    rewritten_res = extract_json_str(rewritten_res)
+    rewritten_res = ast.literal_eval(rewritten_res)
+
+    query = None
+    sources = []
+    output = None
+    valid = rewritten_res.get("valid")
+    if valid == "true":
+        query = rewritten_res.get("query")
+        sources = rewritten_res.get("sources", [])
+    else:
+        output = rewritten_res.get("output")
+
+    return query, sources, output
 
 
 # Not used functions below.

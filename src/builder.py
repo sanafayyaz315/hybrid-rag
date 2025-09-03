@@ -15,11 +15,17 @@ from src.embed import DenseEmbedder, SparseEmbedder
 from src.rerank import Rerank
 from src.qdrant_utils import QdrantStore
 from src.llm import LLM
-from src.docstore.setup import init_db
+# from src.docstore.setup import init_db
+from src.db_setup import init_db
 from src.docstore.session import AsyncSessionLocal
 from src.cache import RagSemanticCache, RedisClient
+import src.docstore.models
+import frontend.chainlit_models
 from src.config import *
 from src.logger import logger
+
+# Initialize docstore database
+init_db()
 
 # initialize loader
 loader = FileLoader()
@@ -79,9 +85,6 @@ def build_minio_client(minio_bucket:str = MINIO_BUCKET) -> Minio:
         client.make_bucket(minio_bucket)
     return client
 minio_client = build_minio_client()
-
-# Initilaize docstore database
-init_db()
 
 # initialize LLM
 llm = LLM(

@@ -2,16 +2,43 @@ You are given a user query that may be vague, ambiguous, or written in shorthand
 If the user query mentions a resource that matches one or many sources in the list given below, identify the source and leave the source key empty if the query does not mention any source.
 {sources}
 
-Instructions:
-- Keep the meaning of the original query intact.
-- Expand abbreviations, implicit references, or incomplete thoughts.
-- Rephrase it into proper grammar and natural language.
-- Ensure it is understandable without additional context.
-- Make sure to add all the sources from the user query.
-- Use the EXACT source name.
-- If the user query is already well-written and does not require changes, you may leave it as is and provide the same query in your response.
-- Your response should be in the following JSON format:
+# Instructions:
+ - Always incorporate relevant context from conversation history if it relates to the user question.
+ - Preserve the original meaning of the query.
+ - Replace vague terms (e.g., “this,” “it”) with clear references.
+ - Expand abbreviations, implicit references, or incomplete thoughts.
+ - Rephrase into correct grammar and natural language.
+ - Ensure the query is self-contained and understandable.
+ - Include all sources from the user query using their exact names.
+ - If the query is already clear and well-written, return it unchanged.
+ - Only return valid:false if the query is unsafe, nonsensical, or impossible to answer with the given context and chat history. 
+ - Otherwise, treat broad questions as valid and provide a complete explanatory rewrite.
+ - If a user question seems ambiguous at first, decide if it can be rewritten using the conversation history. If not, return valid:false.
+ - If the user greets, set valid:false and respond nicely
 
-{{ "query": <same or rewritten user query>,
-    "sources": <empty or list of identified source>
-}}
+Respond in one of the following JSON formats:
+    
+    If the user query is valid and can be rewritten
+    Return:
+    ```json
+    {{
+    "valid": "true",
+    "query": "<rewritten_query>",
+    "sources": ["<source1>", "<source2>", "..."]
+    }}
+    ```
+
+    If the user message is 
+    - ambiguous
+    - potentially harmful
+    - Incomplete or missing necessary context and cannot be completed using the conversation history.
+    Return:
+    ```json
+    {{
+    "valid": "false",
+    "output": "clarifying question or request for more context or respond back nicely if it's not a question"
+    }}
+    ```
+
+### Conversation History:
+{chat_history}

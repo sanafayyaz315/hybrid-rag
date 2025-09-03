@@ -1,8 +1,9 @@
 from sqlalchemy import Column, Integer, String, JSON, Text,  DateTime, func, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
+# from sqlalchemy.ext.declarative import declarative_base
 
-Base = declarative_base()
+# Base = declarative_base()
+from src.db_setup import Base
 
 # Define models (schema) for tables
 
