@@ -1,11 +1,11 @@
-chainlit==2.7.2
 datasets==4.0.0
 fastapi==0.116.1
 fastembed==0.7.3
-fitz==0.0.1.dev2
+pymudf
 langchain==0.3.27
+asyncpg==0.30.0
 minio==7.2.16
-numpy==2.3.2
+numpy==1.26.4
 openai==1.104.2
 pandas==2.3.2
 pydantic==2.11.7
@@ -31,4 +31,3 @@ torch==2.2.2
 tqdm==4.67.1
 transformers==4.54.1
 urllib3==2.5.0
-

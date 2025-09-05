@@ -182,14 +182,20 @@ Install all required packages:
 pip install -r requirements.txt
 ```
 
-#### 3. Run the Chainlit UI
+#### 3. Spin-up Containers for Qdrant, Postgres(docstore), Minio, Redis
+```bash
+docker compose -f database/docker-compose.yml up  -d 
+```
+⚠️ Make sure Docker is installed and running before starting the services.
+
+#### 4. Run the Chainlit UI
 cd frontend
 ```bash
 cd frontend
 PYTHONPATH=.. chainlit run app.py
 ```
 
-#### 4. Run the API Endpoints (Optional)
+#### 5. Run the API Endpoints (Optional)
  Running the API is **not required** for the Chainlit UI, but it exposes endpoints that can be consumed by other applications or services.
 
 ```bash
@@ -197,4 +203,14 @@ cd src
 PYTHONPATH=.. python api/main.py
 ```
 
+
+| Service        | Purpose                     | Host:Port                     | Credentials (from compose)                                |
+|----------------|-----------------------------|--------------------------------|-----------------------------------------------------------|
+| **Chainlit UI**| Project frontend            | [http://localhost:8000](http://localhost:8000) | – |
+| **Qdrant Dashboard**     | Vector database   | [http://localhost:6333/dashboard](http://localhost:6333) | – |
+| **PostgreSQL** | Docstore (relational DB)    | `localhost:5431`               | `docuser / docpass`, DB: `docstore` |
+| **MinIO API**  | Object storage (S3 API)     | `http://localhost:9000`        | `admin / admin12345` |
+| **MinIO Console** | Web dashboard for MinIO  | [http://localhost:9090](http://localhost:9090) | `admin / admin12345` |
+| **Redis**      | In-memory data store        | `localhost:6379`               | – |
+| **Redis Insight** | Redis visualization UI   | [http://localhost:8002](http://localhost:8002) | – |
 
