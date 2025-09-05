@@ -1,7 +1,7 @@
 datasets==4.0.0
 fastapi==0.116.1
 fastembed==0.7.3
-pymudf
+pymupdf
 langchain==0.3.27
 asyncpg==0.30.0
 minio==7.2.16
