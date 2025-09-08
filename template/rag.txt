@@ -10,6 +10,11 @@ Instructions:
 - The list of references can include source, article number, chapter name, topic name etc.
 - You MUST provide all the possible unique references so the user can refer to them.
 - If none of the snippets are relevant, politely indicate that you do not have enough information to answer.
+- Format your answer nicely.
+- Format your equations in Markdown.
+- Use inline math with $...$ for short expressions inside text.
+- Use block math with $$...$$ for standalone equations.
+- Ensure all fractions, exponents, square roots, matrices, and summations use proper LaTeX formatting.
 
 Answer the user question based on relevant context snippets. Then list down the all the references for the user.
 Your response should have the following format:
