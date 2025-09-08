@@ -215,3 +215,5 @@ PYTHONPATH=.. python api/main.py
 | **Redis**      | In-memory data store        | `localhost:6379`               | – |
 | **Redis Insight** | Redis visualization UI   | [http://localhost:8002](http://localhost:8002) | – |
 
+## Demo
+![Demo](rag_demo.gif)
