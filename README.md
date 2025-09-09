@@ -12,9 +12,9 @@ This project implements a **Hybrid Retrieval-Augmented Generation (RAG) pipeline
 The pipeline combines:
 - **Query Rewriting** to add contextual richness and preserve chat history.  
 - **Semantic Cache** to avoid redundant retrieval when a similar query was already processed.  
-- **Hybrid Retrieval (dense + sparse)** to fetch both semantic and keyword-based relevant chunks.  
+- **Hybrid Retrieval (dense + sparse)** to fetch both semantic and keyword-based relevant chunks. This stage provides better recall - retrieves all the relevent docs (reduces FN)
 - **Hierarchical Retrieval** (child chunks → parent chunks → immediate parents).  
-- **Cross-Encoder Re-ranking** to refine retrieved context.  
+- **Cross-Encoder Re-ranking** to refine retrieved context. This stage is to provide high precision - keep the docs that are actuall relevant (ordered by relevancy score, reduces FP)
 - **Context Relevance Checking** to ensure high-quality responses.  
 - **LLM-based Response Generation** to produce accurate and context-aware answers.  
 
